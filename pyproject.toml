@@ -1,6 +1,6 @@
 [project]
 name = "aemonemdata"
-version = "2024.7.1"
+version = "2024.7.2b1"
 authors = [
   { name="Chris Abberley", email="unlisted@gmail.com" },
 ]
