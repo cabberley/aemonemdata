@@ -1,4 +1,4 @@
-from str_enum import StrEnum
+from .str_enum import StrEnum
 
 
 class BaseUrl(StrEnum):

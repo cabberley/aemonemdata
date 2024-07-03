@@ -2,9 +2,8 @@
 
 import json
 from typing import Any
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from aiohttp import ClientSession, ClientResponse
-import asyncio
 
 from .constants import (
     BaseUrl,
@@ -22,7 +21,7 @@ from .exceptions import (
 class AemoNemData:
     """AEMO Nem Data transformation and processing."""
 
-    def __init__(self: str):
+    def __init__(self: str, client_session: ClientSession = None):
         self._region_id = None
         self._aemo_data_full = {}
         self._aemo_data_now = {}
@@ -34,7 +33,7 @@ class AemoNemData:
         self._aemo_data_actual = []
         self._aemo_data_forecast = []
         self._timeout = 15
-        self._session = ClientSession()
+        self._session: ClientSession = client_session if client_session else ClientSession()
         self._ameo_mkt_limits = {}
         self._mkt_cap = None
 
