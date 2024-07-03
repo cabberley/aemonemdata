@@ -1,6 +1,6 @@
 [project]
 name = "aemonewdata"
-version = "2024.7.0"
+version = "2024.7.1"
 authors = [
   { name="Chris Abberley", email="unlisted@gmail.com" },
 ]
@@ -14,7 +14,6 @@ classifiers = [
 ]
 dependencies = [
       "aiohttp>=3.8.1",
-      "json",
       "asyncio"
     ]
 
