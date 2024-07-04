@@ -126,6 +126,7 @@ class AemoNemData:
     async def _get_current_cumul_price(self):
         """Get AEMO Data."""
         test= await self._get_current_cumulative_price()
+        self._aemo_data_cumul_price = {}
         for region in test["actual"]:
             actual_current = max(test["actual"][region], key=lambda x:x["SETTLEMENTDATE"])
             test["actual"][region] = sorted(test["actual"][region], key=lambda x:x["SETTLEMENTDATE"])
