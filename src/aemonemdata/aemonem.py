@@ -4,15 +4,15 @@ from typing import Any
 from datetime import datetime, timedelta
 from aiohttp import ClientSession, ClientResponse
 
-from utils import current_30min_window
+from .utils import current_30min_window
 
-from constants import (
+from .constants import (
     BaseUrl,
     EndPoint,
     REGIONS,
     AUTH_ERROR_CODES,
 )
-from exceptions import (
+from .exceptions import (
         AuthError,
         ClientError,
 )

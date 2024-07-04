@@ -6,6 +6,9 @@ from .constants import (
 )
 from .aemonem import (
     AemoNemData,
-    ) 
+    )
 
-__all__ = ["EndPoint","BaseUrl","REGIONS","AUTH_ERROR_CODES","AemoNemData"]
+from .utils import (
+    current_30min_window
+)
+__all__ = ["EndPoint","BaseUrl","REGIONS","AUTH_ERROR_CODES","AemoNemData","current_30min_window"]
