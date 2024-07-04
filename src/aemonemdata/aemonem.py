@@ -33,17 +33,25 @@ class AemoNemData:
         self._aemo_data_actual = []
         self._aemo_data_forecast = []
         self._timeout = 15
-        self._session: ClientSession = client_session if client_session else ClientSession()
+        self._session = client_session #ClientSession = client_session if client_session else ClientSession()
+        self._session_manage = True
         self._ameo_mkt_limits = {}
         self._mkt_cap = None
+        if client_session:
+            self._session_manage = False
 
     async def get_aemo_data(self, state: list) -> dict[str, Any]:
         """Get AEMO Data."""
         regions = []
         if state is not None:
+            if self._session_manage:
+                self._session = ClientSession()
             for region in state:
                 regions.append(REGIONS[region.lower()])
             await self._get_current_30min_price(regions)
+            self._aemo_data_results.pop("current_price")
+            if self._session_manage:
+                self._session.close()
         return self._aemo_data_results
 
 
@@ -105,21 +113,22 @@ class AemoNemData:
         for record in response['NEM_DASHBOARD_CUMUL_PRICE']:
             clean_record = {}
             if record["A"] == 1:
-                clean_record["PERIODTYPE"] = "actual"
-                clean_record["SETTLEMENTDATE"]=datetime.fromisoformat(record["DT"]+'+10:00')
-                clean_record["PERIODSTARTDATE"] = clean_record["SETTLEMENTDATE"] - timedelta(minutes=5)
+                clean_record["period_type"] = "actual"
+                clean_record["settlement_date"]=datetime.fromisoformat(record["DT"]+'+10:00')
+                clean_record["period_start_date"] = clean_record["settlement_date"] - timedelta(minutes=5)
             elif record["A"] == 0:
-                clean_record["PERIODTYPE"] = "forecast"
-                clean_record["SETTLEMENTDATE"]=datetime.fromisoformat(record["DT"]+'+10:00')
-                clean_record["PERIODSTARTDATE"] = clean_record["SETTLEMENTDATE"] - timedelta(minutes=30)
-            clean_record["REGIONID"] = record["R"]
-            clean_record["PRICE"] = record["P"]
-            clean_record["CUMULATIVEPRICE"] = record["CP"]
-            if clean_record["PERIODTYPE"] not in self._aemo_data_cumul_price:
-                self._aemo_data_cumul_price[clean_record["PERIODTYPE"]] = {}
-            if clean_record["REGIONID"] not in self._aemo_data_cumul_price[clean_record["PERIODTYPE"]]:
-                self._aemo_data_cumul_price[clean_record["PERIODTYPE"]][clean_record["REGIONID"]] = []
-            self._aemo_data_cumul_price[clean_record["PERIODTYPE"]][clean_record["REGIONID"]].append(clean_record)
+                clean_record["period_type"] = "forecast"
+                clean_record["settlement_date"]=datetime.fromisoformat(record["DT"]+'+10:00')
+                clean_record["period_start_date"] = clean_record["settlement_date"] - timedelta(minutes=30)
+            clean_record["region_id"] = record["R"]
+            clean_record["price_mw"] = record["P"]
+            clean_record["price_kw"] = round(record["P"]/1000,4)
+            clean_record["cumulative_price"] = record["CP"]
+            if clean_record["period_type"] not in self._aemo_data_cumul_price:
+                self._aemo_data_cumul_price[clean_record["period_type"]] = {}
+            if clean_record["region_id"] not in self._aemo_data_cumul_price[clean_record["period_type"]]:
+                self._aemo_data_cumul_price[clean_record["period_type"]][clean_record["region_id"]] = []
+            self._aemo_data_cumul_price[clean_record["period_type"]][clean_record["region_id"]].append(clean_record)
 
         return self._aemo_data_cumul_price
 
@@ -137,6 +146,8 @@ class AemoNemData:
 
     async def _get_current_30min_price(self, regions: list[str]):
         """Get AEMO Data."""
+        self._aemo_data_results = {}
+        self._aemo_data_cumul_price = {}
         current_30min_window_start, current_30min_window_end = current_30min_window()
         current_price_data= await self._get_current_cumulative_price()
         if self._mkt_cap is None:
@@ -145,28 +156,66 @@ class AemoNemData:
         for region in current_price_data["actual"]:
             if region in regions:
                 for record in current_price_data["actual"][region]:
-                    if record["PERIODSTARTDATE"] >= current_30min_window_start and record["PERIODSTARTDATE"] < current_30min_window_end:
+                    if record["period_start_date"] >= current_30min_window_start and record["period_start_date"] < current_30min_window_end:
                         if "current_price" not in self._aemo_data_results:
                             self._aemo_data_results["current_price"] = {}
                         if region not in self._aemo_data_results["current_price"]:
                             self._aemo_data_results["current_price"][region] = []
                         self._aemo_data_results["current_price"][region].append(record)
+        for region in current_price_data["actual"]:
+            period_order = {}
+            if region in regions:
+                for record in current_price_data["actual"][region]:
+                    if record["period_start_date"] >= current_30min_window_start and record["period_start_date"] < current_30min_window_end:
+                        if "current_price_window" not in self._aemo_data_results:
+                            self._aemo_data_results["current_price_window"] = {}
+                        if region not in self._aemo_data_results["current_price_window"]:
+                            self._aemo_data_results["current_price_window"][region] = {}
+                        if record["period_start_date"].minute == 0 or record["period_start_date"].minute == 30:
+                            period_order["period_1"]=record
+                        elif record["period_start_date"].minute == 5 or record["period_start_date"].minute == 35:
+                            period_order["period_2"]=record
+                        elif record["period_start_date"].minute == 10 or record["period_start_date"].minute == 40:
+                            period_order["period_3"]=record
+                        elif record["period_start_date"].minute == 15 or record["period_start_date"].minute == 45:
+                            period_order["period_4"]=record
+                        elif record["period_start_date"].minute == 20 or record["period_start_date"].minute == 50:
+                            period_order["period_5"]=record
+                        elif record["period_start_date"].minute == 25 or record["period_start_date"].minute == 55:
+                            period_order["period_6"]=record
+                        self._aemo_data_results["current_price_window"][region]=period_order
+                x_while =0
+                while x_while <6:
+                    x_while +=1
+                    if "period_"+str(x_while) not in self._aemo_data_results["current_price_window"][region]:
+                        blank_period = {
+                            "period_type":None,
+                            "settlement_date": None,
+                            "period_start_date": None,
+                            "region_id": region,
+                            "price_mw": 0,
+                            "price_kw": 0,
+                            "cumulative_price":0,
+                        }
+                        self._aemo_data_results["current_price_window"][region]["period_"+str(x_while)]= blank_period
         for region in self._aemo_data_results["current_price"]:
             if region in regions:
                 records_count = len(self._aemo_data_results["current_price"][region])
-                current_actual_prices = round(sum(item["PRICE"] for item in self._aemo_data_results["current_price"][region])/1000,4)
+                current_actual_prices = sum(item["price_kw"] for item in self._aemo_data_results["current_price"][region])
+                current_5min_price = (max(current_price_data["actual"][region], key=lambda x:x["settlement_date"]))["price_kw"]
                 current_30min_avg = round(current_actual_prices/records_count,4)
-                current_30min_forecast = round((min(current_price_data["forecast"][region], key=lambda x:x["SETTLEMENTDATE"]))["PRICE"]/1000,4)
+                current_30min_forecast = round((min(current_price_data["forecast"][region], key=lambda x:x["settlement_date"]))["price_kw"],4)
                 current_30min_estimated = round((current_actual_prices + current_30min_forecast*(6-records_count))/6,4)
-                current_cumulative_price = round((max(current_price_data["actual"][region], key=lambda x:x["SETTLEMENTDATE"]))["CUMULATIVEPRICE"],0)
+                current_cumulative_price = round((max(current_price_data["actual"][region], key=lambda x:x["settlement_date"]))["cumulative_price"],0)
                 if "current_30min_forecast" not in self._aemo_data_results:
                     self._aemo_data_results["current_30min_forecast"] = {}
                 if region not in self._aemo_data_results["current_30min_forecast"]:
                     self._aemo_data_results["current_30min_forecast"][region] = {}
                 forcast_data = []
                 for record in current_price_data["forecast"][region]:
-                    forcast_data.append({"start_time": record["PERIODSTARTDATE"] ,"end_time": record["SETTLEMENTDATE"], "price": record["PRICE"]/1000})
+                    forcast_data.append({"start_time": record["period_start_date"] ,"end_time": record["settlement_date"], "price": record["price_kw"]})
                 data = {
+                    "current_5min_period_price": current_5min_price,
                     "current_30min_avg": current_30min_avg,
                     "current_30min_forecast": current_30min_forecast,
                     "current_30min_estimated": current_30min_estimated,
@@ -179,7 +228,6 @@ class AemoNemData:
                     "apc_flag": (True if mkt_limits[region]["APCFLAG"] == 1 else False),
                     "periods_of_current_30min": records_count,
                     "forecast": forcast_data,
-                    
                 }
                 self._aemo_data_results["current_30min_forecast"][region] = data
         return
