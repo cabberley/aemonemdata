@@ -1,18 +1,18 @@
-"""AEMO Nem Data transformation and processing."""
-
+"""AemoNemData class to get data from AEMO API."""
 import json
 from typing import Any
 from datetime import datetime, timedelta
 from aiohttp import ClientSession, ClientResponse
 
-from .constants import (
+from utils import current_30min_window
+
+from constants import (
     BaseUrl,
     EndPoint,
     REGIONS,
     AUTH_ERROR_CODES,
 )
-from .utils import current_30min_window
-from .exceptions import (
+from exceptions import (
         AuthError,
         ClientError,
 )
