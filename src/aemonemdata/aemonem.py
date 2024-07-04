@@ -51,7 +51,7 @@ class AemoNemData:
             await self._get_current_30min_price(regions)
             self._aemo_data_results.pop("current_price")
             if self._session_manage:
-                self._session.close()
+                await self._session.close()
         return self._aemo_data_results
 
 
