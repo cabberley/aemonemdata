@@ -165,12 +165,13 @@ class AemoNemData:
         for region in current_price_data["actual"]:
             period_order = {}
             if region in regions:
+                if "current_price_window" not in self._aemo_data_results:
+                    self._aemo_data_results["current_price_window"] = {}
+                if region not in self._aemo_data_results["current_price_window"]:
+                    self._aemo_data_results["current_price_window"][region] = {}
                 for record in current_price_data["actual"][region]:
                     if record["period_start_date"] >= current_30min_window_start and record["period_start_date"] < current_30min_window_end:
-                        if "current_price_window" not in self._aemo_data_results:
-                            self._aemo_data_results["current_price_window"] = {}
-                        if region not in self._aemo_data_results["current_price_window"]:
-                            self._aemo_data_results["current_price_window"][region] = {}
+
                         if record["period_start_date"].minute == 0 or record["period_start_date"].minute == 30:
                             period_order["period_1"]=record
                         elif record["period_start_date"].minute == 5 or record["period_start_date"].minute == 35:
