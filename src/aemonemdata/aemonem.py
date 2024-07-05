@@ -187,7 +187,19 @@ class AemoNemData:
                 x_while =0
                 while x_while <6:
                     x_while +=1
-                    if "period_"+str(x_while) not in self._aemo_data_results["current_price_window"][region]:
+                    if len(self._aemo_data_results["current_price_window"][region]) > 0:
+                        if "period_"+str(x_while) not in self._aemo_data_results["current_price_window"][region]:
+                            blank_period = {
+                                "period_type":None,
+                                "settlement_date": None,
+                                "period_start_date": None,
+                                "region_id": region,
+                                "price_mw": 0,
+                                "price_kw": 0,
+                                "cumulative_price":0,
+                            }
+                            self._aemo_data_results["current_price_window"][region]["period_"+str(x_while)]= blank_period
+                    else:
                         blank_period = {
                             "period_type":None,
                             "settlement_date": None,
