@@ -185,7 +185,7 @@ class AemoNemData:
                         elif record["period_start_date"].minute == 25 or record["period_start_date"].minute == 55:
                             period_order["period_6"]=record
                         self._aemo_data_results["current_price_window"][region]=period_order
-                x_while = 6 - len(self._aemo_data_results["current_price_window"][region])
+                x_while = len(self._aemo_data_results["current_price_window"][region])
                 while x_while <6:
                     x_while +=1
                     if len(self._aemo_data_results["current_price_window"][region]) > 0:
