@@ -153,14 +153,15 @@ class AemoNemData:
         if self._mkt_cap is None:
             self._mkt_cap = await self._get_mkt_limit_cap()
         mkt_limits = await self._get_mkt_limit()
+        if "current_price" not in self._aemo_data_results:
+            self._aemo_data_results["current_price"] = {}
+        for region in regions:
+            if region not in self._aemo_data_results["current_price"]:
+                self._aemo_data_results["current_price"][region] = []
         for region in current_price_data["actual"]:
             if region in regions:
                 for record in current_price_data["actual"][region]:
                     if record["period_start_date"] >= current_30min_window_start and record["period_start_date"] < current_30min_window_end:
-                        if "current_price" not in self._aemo_data_results:
-                            self._aemo_data_results["current_price"] = {}
-                        if region not in self._aemo_data_results["current_price"]:
-                            self._aemo_data_results["current_price"][region] = []
                         self._aemo_data_results["current_price"][region].append(record)
         for region in current_price_data["actual"]:
             period_order = {}
