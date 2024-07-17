@@ -245,7 +245,20 @@ class AemoNemData:
                     "apc_flag": (True if mkt_limits[region]["APCFLAG"] == 1 else False),
                     "periods_of_current_30min": records_count,
                     "forecast": forcast_data,
+                    "total_demand": mkt_limits[region]["TOTALDEMAND"],
+                    "scheduled_generation": mkt_limits[region]["SCHEDULEDGENERATION"],
+                    "interconnector_flows": mkt_limits[region]["INTERCONNECTORFLOWS"],
+                    "semi_scheduled_generation": mkt_limits[region]["SEMISCHEDULEDGENERATION"],
+                    "net_interconnector_flows": mkt_limits[region]["NETINTERCHANGE"],
+                    "settlement_date_str": mkt_limits[region]["SETTLEMENTDATE"],
+                    "settlement_date": datetime.fromisoformat(mkt_limits[region]["SETTLEMENTDATE"]+'+10:00'),
                 }
+                for flow in mkt_limits[region]["INTERCONNECTORFLOWS"]:
+                    data[f"flow_{flow["name"]}_name"] = flow["name"]
+                    data[f"flow_{flow["name"]}_value"] = flow["value"]
+                    data[f"flow_{flow["name"]}_export_limit"] = flow["exportlimit"]
+                    data[f"flow_{flow["name"]}_import_limit"] = flow["importlimit"]
+
                 self._aemo_data_results["current_30min_forecast"][region] = data
         return
 
