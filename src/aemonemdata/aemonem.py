@@ -220,7 +220,7 @@ class AemoNemData:
                 if records_count !=0 :
                     current_30min_avg = round(current_actual_prices/records_count,4)
                 else:
-                    current_30min_avg = 0
+                    current_30min_avg = None
                 current_30min_forecast = round((min(current_price_data["forecast"][region], key=lambda x:x["settlement_date"]))["price_kw"],4)
                 current_30min_estimated = round((current_actual_prices + current_30min_forecast*(6-records_count))/6,4)
                 current_cumulative_price = round((max(current_price_data["actual"][region], key=lambda x:x["settlement_date"]))["cumulative_price"],0)
