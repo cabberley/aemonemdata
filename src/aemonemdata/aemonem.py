@@ -196,9 +196,9 @@ class AemoNemData:
                                 "settlement_date": None,
                                 "period_start_date": None,
                                 "region_id": region,
-                                "price_mw": 0,
-                                "price_kw": 0,
-                                "cumulative_price":0,
+                                "price_mw": None,
+                                "price_kw": None,
+                                "cumulative_price": None,
                             }
                             self._aemo_data_results["current_price_window"][region]["period_"+str(x_while)]= blank_period
                     else:
@@ -207,9 +207,9 @@ class AemoNemData:
                             "settlement_date": None,
                             "period_start_date": None,
                             "region_id": region,
-                            "price_mw": 0,
-                            "price_kw": 0,
-                            "cumulative_price":0,
+                            "price_mw": None,
+                            "price_kw": None,
+                            "cumulative_price": None,
                         }
                         self._aemo_data_results["current_price_window"][region]["period_"+str(x_while)]= blank_period
         for region in self._aemo_data_results["current_price"]:
