@@ -3,23 +3,24 @@ import json
 from asyncio import Lock, TimeoutError
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from math import isfinite
 from typing import Any
-from datetime import datetime, timedelta, timezone
-from aiohttp import ClientSession, ClientResponse, ClientError as AiohttpClientError
 
-from .utils import current_30min_window
+from aiohttp import ClientError as AiohttpClientError
+from aiohttp import ClientResponse, ClientSession
 
 from .constants import (
+    AUTH_ERROR_CODES,
+    REGIONS,
     BaseUrl,
     EndPoint,
-    REGIONS,
-    AUTH_ERROR_CODES,
 )
 from .exceptions import (
-        AuthError,
-        ClientError,
+    AuthError,
+    ClientError,
 )
+from .utils import current_30min_window
 
 
 class AemoNemData:
