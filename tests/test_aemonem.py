@@ -167,13 +167,37 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_repeated_polling_caches_key_and_limits_without_duplicate_records(self):
         first = await self.client.get_aemo_data(["nsw"])
-        self.assertEqual(first, await self.client.get_aemo_data(["nsw"]))
+        snapshot = deepcopy(first)
+        second = await self.client.get_aemo_data(["nsw"])
+        self.assertEqual(first, snapshot)
+        self.assertEqual(second, snapshot)
+        for result in (snapshot, second):
+            data = result["current_30min_forecast"]["NSW1"]
+            self.assertEqual(data["periods_of_current_30min"], 3)
+            self.assertEqual(len(data["forecast"]), 2)
+            periods = result["current_price_window"]["NSW1"]
+            self.assertEqual(set(periods), {f"period_{i}" for i in range(1, 7)})
+            self.assertEqual(
+                [periods[f"period_{i}"]["price_kw"] for i in range(1, 7)],
+                [0.1, 0.2, -0.05, None, None, None],
+            )
+        self.assertEqual(len(self.client._aemo_data_cumul_price["actual"]["NSW1"]), 4)
+        self.assertEqual(len(self.client._aemo_data_cumul_price["forecast"]["NSW1"]), 2)
         self.assertEqual(self.count("config"), 1)
         self.assertEqual(self.count("marketPriceLimits"), 1)
         self.assertEqual(self.count("cumulativePrice"), 2)
         self.assertEqual(self.count("elecSummary"), 2)
         self.assertEqual(len(self.client._aemo_data_elec_nem_summary_prices), 5)
         self.assertFalse(self.session.closed)
+
+    async def test_null_summary_prices_do_not_change_returned_dashboard_data(self):
+        expected = await self.client.get_aemo_data(list(REGIONS))
+        for item in self.payloads["elecSummary"]["data"]["prices"]:
+            item["rrp"] = None
+        result = await self.client.get_aemo_data(list(REGIONS))
+        self.assertEqual(result, expected)
+        for region in REGIONS.values():
+            self.assertIsNone(self.client._aemo_data_elec_nem_summary_prices[region]["RRP"])
 
     async def test_price_route_uses_get_30min_query_and_legacy_shape(self):
         actual, forecast = await self.client.get_data("NSW1")
@@ -298,16 +322,56 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             await self.client.get_aemo_data(["nsw"])
 
     async def test_invalid_period_type(self):
-        self.payloads["priceAndDemand"]["data"]["items"][0]["periodType"] = "UNKNOWN"
+        row = next(
+            item for item in self.payloads["priceAndDemand"]["data"]["items"]
+            if item["regionId"] == "NSW1"
+        )
+        row["periodType"] = "UNKNOWN"
         with self.assertRaisesRegex(ClientError, "unknown periodType"):
             await self.client.get_data("NSW1")
 
     async def test_invalid_numeric_prices(self):
+        row = next(
+            item for item in self.payloads["priceAndDemand"]["data"]["items"]
+            if item["regionId"] == "NSW1"
+        )
         for value in (None, "100", True, float("nan"), float("inf")):
             with self.subTest(value=value):
-                self.payloads["priceAndDemand"]["data"]["items"][0]["rrp"] = value
+                row["rrp"] = value
                 with self.assertRaisesRegex(ClientError, "finite number"):
                     await self.client.get_data("NSW1")
+
+    async def test_malformed_price_rows_for_other_regions_are_not_normalized(self):
+        self.payloads["priceAndDemand"]["data"]["items"].extend([
+            {"regionId": "QLD1"},
+            {"regionId": "QLD1", "rrp": None, "periodType": "ACTUAL",
+             "settlementDate": START.isoformat()},
+            {"regionId": "QLD1", "rrp": 100, "periodType": "UNKNOWN",
+             "settlementDate": START.isoformat()},
+            {"regionId": "QLD1", "rrp": 100, "periodType": "ACTUAL",
+             "settlementDate": "invalid"},
+        ])
+        actual, forecast = await self.client.get_data("NSW1")
+        self.assertEqual((len(actual), len(forecast)), (4, 2))
+        self.assertTrue(all(row["REGIONID"] == "NSW1" for row in actual + forecast))
+        self.assertEqual(actual[-1]["SPOTPRICEPERKW"], -0.05)
+
+    async def test_requested_price_rows_still_require_fields_and_valid_timestamps(self):
+        for item in (
+            {"regionId": "NSW1"},
+            {"regionId": "NSW1", "rrp": 100, "periodType": "ACTUAL",
+             "settlementDate": "invalid"},
+        ):
+            with self.subTest(item=item):
+                self.payloads["priceAndDemand"] = payloads()["priceAndDemand"]
+                self.payloads["priceAndDemand"]["data"]["items"].append(item)
+                with self.assertRaises(ClientError):
+                    await self.client.get_data("NSW1")
+
+    async def test_full_price_read_still_validates_all_regions(self):
+        self.payloads["priceAndDemand"]["data"]["items"].append({"regionId": "QLD1"})
+        with self.assertRaisesRegex(ClientError, "missing required fields"):
+            await self.client._get_data_full()
 
     async def test_invalid_cumulative_price(self):
         self.payloads["cumulativePrice"]["data"]["items"][0]["cp"] = None
@@ -342,13 +406,18 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(periods["period_3"]["price_kw"], -0.05)
 
     async def test_empty_current_window_keeps_null_average_and_forecast_estimate(self):
+        self.payloads["cumulativePrice"]["data"]["items"].append({
+            "dt": START.isoformat(), "r": "NSW1", "p": 800, "cp": 123456, "a": 1,
+        })
         self.payloads["cumulativePrice"]["data"]["items"] = [
             row for row in self.payloads["cumulativePrice"]["data"]["items"]
-            if row["a"] == 0 or self.client._settlement_date(row["dt"]) < START
+            if row["a"] == 0
+            or self.client._settlement_date(row["dt"]) - timedelta(minutes=5) < START
         ]
         result = await self.client.get_aemo_data(["nsw"])
         data = result["current_30min_forecast"]["NSW1"]
         self.assertEqual(data["periods_of_current_30min"], 0)
+        self.assertEqual(data["current_5min_period_price"], 0.8)
         self.assertIsNone(data["current_30min_avg"])
         self.assertEqual(data["current_30min_estimated"], 0.4)
         for row in result["current_price_window"]["NSW1"].values():
@@ -583,10 +652,10 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         release = asyncio.Event()
         original = self.client._price_records
 
-        async def blocked_records():
+        async def blocked_records(region):
             entered.set()
             await release.wait()
-            return await original()
+            return await original(region)
 
         async def second_call():
             second_started.set()
@@ -615,8 +684,71 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
 
+    async def test_unsupported_requested_regions_raise_client_error_without_requests(self):
+        for region in ("nws", "wa", "", None, 42, ["nsw"]):
+            with self.subTest(region=region):
+                with self.assertRaisesRegex(ClientError, "Unsupported region name"):
+                    await self.client.get_aemo_data(["nsw", region])
+                self.assertEqual(self.requests, [])
+
+    async def test_invalid_requested_region_preserves_previous_successful_result(self):
+        result = await self.client.get_aemo_data(["nsw"])
+        snapshot = deepcopy(result)
+        requests = len(self.requests)
+        with self.assertRaisesRegex(ClientError, "Unsupported region name"):
+            await self.client.get_aemo_data(["qld", "nws"])
+        self.assertEqual(result, snapshot)
+        self.assertEqual(len(self.requests), requests)
+        recovered = await self.client.get_aemo_data(["QLD"])
+        self.assertEqual(set(recovered["current_30min_forecast"]), {"QLD1"})
+
     async def test_none_state_remains_a_no_op(self):
         self.assertEqual(await self.client.get_aemo_data(None), {})
+        self.assertEqual(self.requests, [])
+
+    async def test_empty_region_list_is_a_no_op_with_fresh_results(self):
+        empty = await self.client.get_aemo_data([])
+        self.assertEqual(empty, {})
+        empty["unexpected"] = True
+        self.assertEqual(await self.client.get_aemo_data([]), {})
+        self.assertEqual(self.requests, [])
+
+    async def test_empty_region_list_preserves_previous_successful_result(self):
+        result = await self.client.get_aemo_data(["nsw"])
+        snapshot = deepcopy(result)
+        requests = len(self.requests)
+        self.assertEqual(await self.client.get_aemo_data([]), {})
+        self.assertEqual(result, snapshot)
+        self.assertEqual(len(self.requests), requests)
+
+    async def test_none_state_after_success_returns_fresh_empty_result(self):
+        result = await self.client.get_aemo_data(["nsw"])
+        snapshot = deepcopy(result)
+        requests = len(self.requests)
+        empty = await self.client.get_aemo_data(None)
+        self.assertEqual(empty, {})
+        self.assertIsNot(empty, result)
+        empty["unexpected"] = True
+        self.assertEqual(await self.client.get_aemo_data(None), {})
+        self.assertEqual(result, snapshot)
+        self.assertEqual(len(self.requests), requests)
+
+    async def test_none_state_after_failure_does_not_expose_partial_results(self):
+        async def fail_update(regions):
+            self.client._aemo_data_results = {"current_price": {regions[0]: []}}
+            raise ClientError("Interrupted update")
+
+        with patch.object(self.client, "_get_current_30min_price", side_effect=fail_update):
+            with self.assertRaisesRegex(ClientError, "Interrupted update"):
+                await self.client.get_aemo_data(["qld"])
+        partial = self.client._aemo_data_results
+        self.assertTrue(partial)
+        empty = await self.client.get_aemo_data(None)
+        self.assertEqual(empty, {})
+        self.assertIsNot(empty, partial)
+        empty["unexpected"] = True
+        self.assertEqual(await self.client.get_aemo_data(None), {})
+        self.assertEqual(partial, {"current_price": {"QLD1": []}})
         self.assertEqual(self.requests, [])
 
 

@@ -49,15 +49,18 @@ class AemoNemData:
             self._session_manage = False
 
     async def get_aemo_data(self, state: list) -> dict[str, Any]:
-        """Get AEMO Data."""
+        """Get AEMO data, or a fresh empty result when no state is supplied."""
+        if not state:
+            return {}
         async with self._update_lock:
             regions = []
-            if state is not None:
-                for region in state:
-                    regions.append(REGIONS[region.lower()])
-                async with self._session_scope():
-                    await self._get_current_30min_price(regions)
-                    self._aemo_data_results.pop("current_price")
+            for region in state:
+                if not isinstance(region, str) or region.lower() not in REGIONS:
+                    raise ClientError(f"Unsupported region name: {region!r}")
+                regions.append(REGIONS[region.lower()])
+            async with self._session_scope():
+                await self._get_current_30min_price(regions)
+                self._aemo_data_results.pop("current_price")
             return self._aemo_data_results
 
     @asynccontextmanager
@@ -148,10 +151,12 @@ class AemoNemData:
             raise ClientError(f"Invalid dashboard response for {endpoint}: missing items")
         return items
 
-    async def _price_records(self) -> list[dict[str, Any]]:
+    async def _price_records(self, region: str | None = None) -> list[dict[str, Any]]:
         items = await self._dashboard_items(EndPoint.API_5MIN_URL)
         records = []
         for item in items:
+            if region is not None and item.get("regionId") != region:
+                continue
             self._require_fields(
                 item, {"settlementDate", "regionId", "rrp", "periodType"}, "price record"
             )
@@ -175,7 +180,7 @@ class AemoNemData:
             self._aemo_data_actual = []
             self._aemo_data_forecast = []
             self._aemo_data_now = {}
-            for record in await self._price_records():
+            for record in await self._price_records(region):
                 if record['REGIONID'] == self._region_id:
                     if record['PERIODTYPE'] == 'ACTUAL':
                         self._aemo_data_actual.append(record)
@@ -414,7 +419,6 @@ class AemoNemData:
         for item in response["prices"]:
             self._require_fields(item, {"regionId", "rrp"}, "electricity price")
             self._require_region(item["regionId"])
-            self._require_numbers(item, {"rrp"}, "electricity price")
             prices[item["regionId"]] = {key.upper(): value for key, value in item.items()}
         self._aemo_data_elec_nem_summary = summaries
         self._aemo_data_elec_nem_summary_prices = prices

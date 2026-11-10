@@ -28,11 +28,24 @@ retains its original timezone-free ISO format. Missing current-window periods
 retain `None` prices and cumulative prices; `current_30min_avg` remains `None`
 when no actual intervals are available in that window. The new summary has no
 market-notice collection.
+The summary's auxiliary `prices` values may be `None` and are not used in the
+returned dashboard data; numeric validation is applied to the price records
+that are actually used instead.
 
 `AemoNemData()` closes its own HTTP sessions, including on failure. When passing
 an `aiohttp.ClientSession`, the caller remains responsible for closing it.
 HTTP, authentication, and malformed-response failures raise `ClientError` or
 `AuthError` from `aemonemdata.exceptions`.
+
+`get_aemo_data(None)` and `get_aemo_data([])` perform no requests and return a
+fresh empty dictionary, never a cached result from a previous successful or
+failed update.
+Region names are case-insensitive: `nsw`, `qld`, `vic`, `sa`, and `tas`.
+Unsupported names or non-string region entries raise `ClientError` before any
+network requests are made.
+`get_data("NSW1")` filters price rows to that region before validating their
+fields, so malformed price rows for other regions do not break a regional read.
+Malformed rows belonging to the requested region still raise `ClientError`.
 
 These are dashboard-facing endpoints rather than a version-stable API contract;
 future AEMO dashboard changes may require further updates.
