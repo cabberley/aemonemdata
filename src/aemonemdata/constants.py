@@ -3,15 +3,16 @@ from .str_enum import StrEnum
 
 class BaseUrl(StrEnum):
     
-    API= "https://visualisations.aemo.com.au"
+    API = "https://dashboards.public.aemo.com.au"
 
    
 class EndPoint(StrEnum):
     
-    API_5MIN_URL ="/aemo/apps/api/report/5MIN",
-    API_ELEC_NEM_SUMMARY_URL = "/aemo/apps/api/report/ELEC_NEM_SUMMARY"
-    API_MARKET_LIMITS_URL = "/aemo/apps/api/report/NEM_DASHBOARD_MARKET_PRICE_LIMITS"
-    API_CUMULATIVE_PRICE_URL = "/aemo/apps/api/report/NEM_DASHBOARD_CUMUL_PRICE"
+    API_CONFIG_URL = "/config.json"
+    API_5MIN_URL = "/NEM/v1/PWS/NEMDashboard/priceAndDemand?timescale=30MIN"
+    API_ELEC_NEM_SUMMARY_URL = "/NEM/v1/PWS/NEMDashboard/elecSummary"
+    API_MARKET_LIMITS_URL = "/NEM/v1/PWS/NEMDashboard/marketPriceLimits"
+    API_CUMULATIVE_PRICE_URL = "/NEM/v1/PWS/NEMDashboard/cumulativePrice"
     
 
 REGIONS = {
