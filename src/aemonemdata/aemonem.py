@@ -1,6 +1,6 @@
 """AemoNemData class to get data from AEMO API."""
 import json
-from asyncio import TimeoutError
+from asyncio import Lock, TimeoutError
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from math import isfinite
@@ -23,9 +23,11 @@ from .exceptions import (
 
 
 class AemoNemData:
-    """AEMO Nem Data transformation and processing."""
+    """AEMO data client; public fetches are serialized on the caller's event loop."""
 
     def __init__(self, client_session: ClientSession | None = None):
+        """Accept a caller-owned session, preferably Home Assistant's shared session."""
+        self._update_lock = Lock()
         self._region_id = None
         self._aemo_data_full = {}
         self._aemo_data_now = {}
@@ -47,14 +49,15 @@ class AemoNemData:
 
     async def get_aemo_data(self, state: list) -> dict[str, Any]:
         """Get AEMO Data."""
-        regions = []
-        if state is not None:
-            for region in state:
-                regions.append(REGIONS[region.lower()])
-            async with self._session_scope():
-                await self._get_current_30min_price(regions)
-                self._aemo_data_results.pop("current_price")
-        return self._aemo_data_results
+        async with self._update_lock:
+            regions = []
+            if state is not None:
+                for region in state:
+                    regions.append(REGIONS[region.lower()])
+                async with self._session_scope():
+                    await self._get_current_30min_price(regions)
+                    self._aemo_data_results.pop("current_price")
+            return self._aemo_data_results
 
     @asynccontextmanager
     async def _session_scope(self) -> AsyncIterator[None]:
@@ -165,21 +168,22 @@ class AemoNemData:
 
     async def get_data(self, region: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Get AEMO Data."""
-        self._region_id = region
-        _first_forecast = False
-        self._aemo_data_actual = []
-        self._aemo_data_forecast = []
-        self._aemo_data_now = {}
-        for record in await self._price_records():
-            if record['REGIONID'] == self._region_id:
-                if record['PERIODTYPE'] == 'ACTUAL':
-                    self._aemo_data_actual.append(record)
-                elif record['PERIODTYPE'] == 'FORECAST':
-                    self._aemo_data_forecast.append(record)
-                    if not _first_forecast:
-                        _first_forecast = True
-                        self._aemo_data_now = record
-        return self._aemo_data_actual, self._aemo_data_forecast
+        async with self._update_lock:
+            self._region_id = region
+            _first_forecast = False
+            self._aemo_data_actual = []
+            self._aemo_data_forecast = []
+            self._aemo_data_now = {}
+            for record in await self._price_records():
+                if record['REGIONID'] == self._region_id:
+                    if record['PERIODTYPE'] == 'ACTUAL':
+                        self._aemo_data_actual.append(record)
+                    elif record['PERIODTYPE'] == 'FORECAST':
+                        self._aemo_data_forecast.append(record)
+                        if not _first_forecast:
+                            _first_forecast = True
+                            self._aemo_data_now = record
+            return self._aemo_data_actual, self._aemo_data_forecast
 
     async def _get_data_full(self) -> dict[str, Any]:
         """Get AEMO Data."""

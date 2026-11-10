@@ -444,6 +444,177 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaisesRegex(ClientError, "Dashboard request failed"):
                         await self.client.get_aemo_data(["nsw"])
 
+    async def overlapping_calls(self, client, first_call, second_call, blocked_method):
+        first_entered = asyncio.Event()
+        second_started = asyncio.Event()
+        release = asyncio.Event()
+        original = getattr(client, blocked_method)
+        calls = 0
+
+        async def controlled(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                first_entered.set()
+                await release.wait()
+            return await original(*args, **kwargs)
+
+        async def second():
+            second_started.set()
+            return await second_call()
+
+        tasks = []
+        with patch.object(client, blocked_method, side_effect=controlled):
+            try:
+                tasks.append(asyncio.create_task(first_call()))
+                await asyncio.wait_for(first_entered.wait(), 2)
+                tasks.append(asyncio.create_task(second()))
+                await asyncio.wait_for(second_started.wait(), 2)
+                release.set()
+                return await asyncio.wait_for(asyncio.gather(*tasks), 5)
+            finally:
+                release.set()
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def test_concurrent_price_calls_keep_regions_and_results_separate(self):
+        results = await self.overlapping_calls(
+            self.client,
+            lambda: self.client.get_data("NSW1"),
+            lambda: self.client.get_data("QLD1"),
+            "_price_records",
+        )
+        for (actual, forecast), region in zip(results, ("NSW1", "QLD1")):
+            self.assertEqual((len(actual), len(forecast)), (4, 2))
+            self.assertTrue(all(row["REGIONID"] == region for row in actual + forecast))
+        self.assertIsNot(results[0][0], results[1][0])
+
+    async def test_concurrent_dashboard_calls_keep_regions_and_results_separate(self):
+        results = await self.overlapping_calls(
+            self.client,
+            lambda: self.client.get_aemo_data(["nsw"]),
+            lambda: self.client.get_aemo_data(["qld"]),
+            "_get_current_cumulative_price",
+        )
+        for result, region in zip(results, ("NSW1", "QLD1")):
+            self.assertEqual(set(result["current_30min_forecast"]), {region})
+            self.assertEqual(set(result["current_price_window"]), {region})
+
+    async def test_mixed_public_calls_keep_shared_state_separate(self):
+        prices, dashboard = await self.overlapping_calls(
+            self.client,
+            lambda: self.client.get_data("NSW1"),
+            lambda: self.client.get_aemo_data(["qld"]),
+            "_price_records",
+        )
+        self.assertEqual(len(prices[0]), 4)
+        self.assertTrue(all(row["REGIONID"] == "NSW1" for row in prices[0]))
+        self.assertEqual(set(dashboard["current_30min_forecast"]), {"QLD1"})
+        self.assertFalse(self.session.closed)
+
+    async def test_concurrent_owned_calls_close_separate_sessions(self):
+        created = []
+
+        def create_session():
+            session = ClientSession()
+            created.append(session)
+            return session
+
+        client = AemoNemData()
+        with patch("aemonemdata.aemonem.ClientSession", side_effect=create_session):
+            results = await self.overlapping_calls(
+                client,
+                lambda: client.get_aemo_data(["nsw"]),
+                lambda: client.get_aemo_data(["qld"]),
+                "_get_current_cumulative_price",
+            )
+        self.assertEqual(len(created), 2)
+        self.assertTrue(all(session.closed for session in created))
+        self.assertIsNone(client._session)
+        self.assertEqual(set(results[0]["current_30min_forecast"]), {"NSW1"})
+        self.assertEqual(set(results[1]["current_30min_forecast"]), {"QLD1"})
+
+    async def test_shared_session_never_creates_a_private_session(self):
+        with patch(
+            "aemonemdata.aemonem.ClientSession",
+            side_effect=AssertionError("Private session created"),
+        ):
+            await self.client.get_aemo_data(["nsw"])
+            await self.client.get_data("NSW1")
+        self.assertIs(self.client._session, self.session)
+        self.assertFalse(self.session.closed)
+
+    async def check_cancelled_update(self, client, owned):
+        entered = asyncio.Event()
+        sessions = []
+
+        async def blocked_request(*args, **kwargs):
+            sessions.append(client._session)
+            entered.set()
+            await asyncio.Future()
+
+        with patch.object(client, "_api_get", side_effect=blocked_request):
+            task = asyncio.create_task(client.get_aemo_data(["nsw"]))
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+            finally:
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+        self.assertEqual(sessions[0].closed, owned)
+        if owned:
+            self.assertIsNone(client._session)
+        else:
+            self.assertIs(client._session, self.session)
+        result = await client.get_aemo_data(["nsw"])
+        self.assertEqual(set(result["current_30min_forecast"]), {"NSW1"})
+
+    async def test_cancelled_update_closes_owned_session_and_allows_next_update(self):
+        await self.check_cancelled_update(AemoNemData(), True)
+
+    async def test_cancelled_update_keeps_shared_session_and_allows_next_update(self):
+        await self.check_cancelled_update(self.client, False)
+
+    async def test_cancelled_waiting_call_does_not_interrupt_active_update(self):
+        entered = asyncio.Event()
+        second_started = asyncio.Event()
+        release = asyncio.Event()
+        original = self.client._price_records
+
+        async def blocked_records():
+            entered.set()
+            await release.wait()
+            return await original()
+
+        async def second_call():
+            second_started.set()
+            return await self.client.get_data("QLD1")
+
+        with patch.object(self.client, "_price_records", side_effect=blocked_records):
+            first = asyncio.create_task(self.client.get_data("NSW1"))
+            second = None
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                second = asyncio.create_task(second_call())
+                await asyncio.wait_for(second_started.wait(), 2)
+                second.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await second
+                release.set()
+                actual, _ = await asyncio.wait_for(first, 5)
+                self.assertEqual(len(actual), 4)
+                self.assertTrue(all(row["REGIONID"] == "NSW1" for row in actual))
+                self.assertFalse(self.session.closed)
+            finally:
+                release.set()
+                tasks = [task for task in (first, second) if task is not None]
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
     async def test_none_state_remains_a_no_op(self):
         self.assertEqual(await self.client.get_aemo_data(None), {})
         self.assertEqual(self.requests, [])
